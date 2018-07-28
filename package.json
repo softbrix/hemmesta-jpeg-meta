@@ -1,0 +1,26 @@
+{
+  "name": "hemmesta-jpeg-meta",
+  "version": "1.0.0",
+  "description": "Extract the meta fields from a jpeg file",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/softbrix/hemmesta-jpeg-meta.git"
+  },
+  "keywords": [
+    "jpeg",
+    "meta",
+    "extract",
+    "exif",
+    "xmp",
+    "itpc"
+  ],
+  "author": "Andreas Sehr",
+  "license": "MIT",
+  "devDependencies": {
+    "mocha": "^5.2.0"
+  }
+}

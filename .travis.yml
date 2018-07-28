@@ -1,0 +1,11 @@
+language: node_js
+node_js:
+- node
+deploy:
+  provider: npm
+  email: andreas@softbrix.se
+  api_key:
+    secure: fmhAqNKw22JAs+0xSbHsqUE9UdaIdPq0p330Fjy9UAPAdi5OTAnyxBZMI+aa4xhGnX+FYRElfCyCzA84g3lK5FUv1OxnFH27/th72bydbLtwmBOj+c2KWyj22D6IEwTQ2Apsov5dfIt8L07BzDofTonc6vNyPBpBqt9lDQ6s8TKuD4Al978GLlbpmMTmfBgqPHI0UylTPrJGm3eNpWAlS0GCUDOQtK6g5MJfveXG4xM+6zu/EFVlU+SKKpfDZLqRqxSRQ/a3A7xsTOR3WjHQhBnV4VonJ1MZPkR5qFXta1ZbXoNIpQqMXg3rPEkq2M20VJLiDpF1s5fnSFuXT8x3YXWafnHaYxMJDor+HuyYA0CvzJPdc1YqHL6YrZNwO2aWzS32KREnOzp49Op2zMHDkG/7K5xz3ERHUJCargL5Sspqouz8myphZpKoMGyh5mNOT4rbO9a1zFksTdyGF+3/Lgr/wYFySiAkXlGwHaYjg6JOwhcwHVirkRm6qSdzI9IDd4XdtMuM7LhvCe7FVYVoF1WwTc1mL6cUbGH46KQ6Jq10A8NKF6PvnFWWkI7v3aOQ2D/rY9iGe7hKZTpaP152B+oaykWRp4AuQH5ZmuVXVqcYDNGMksIkOLpHJcUQLkLzwrVeA1zg9yNEO+6j5AGUol6xe0vEEwrfk+a9j9pYZ8Q=
+  on:
+    tags: true
+    repo: softbrix/hemmesta-jpeg-meta
