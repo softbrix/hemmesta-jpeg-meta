@@ -18,28 +18,29 @@ function getBufferName(buffer) {
 	return 'unknown';
 }
 
-async function readSize(fd) {
+function isString (value) {
+    return typeof value === 'string' || value instanceof String;
+}
+
+async function readFileSize(fd) {
     let fst = await fstat(fd);
     return fst.size;
-} 
+}
 
-async function loadBlocksFromFile (fd, buffer) {
-    var offset = 0, 
-    fileOffset = 0,
+async function loadBlocks (buffer, bufferSize, readMoreFunc) {
+    var offset = 0,
+    fullOffset = 0,
     blocks = {};
-    async function readFile(stepForward) {
-        fileOffset += stepForward;
+    async function readMore(stepForward) {
+        fullOffset += offset;
         offset = 0;
-        if (DEBUG) console.log('reading file', fileOffset);
-        // Read the file, callback methods has been promisified with util and returns both the buffer and the bytes read
-        return (await read(fd, buffer, 0, buffer.length, fileOffset)).bytesRead;
+        return readMoreFunc(stepForward);
     }
-    let bufferSize = await readSize(fd);
     if (!bufferSize || bufferSize < 8) {
         throw new Error('Too few bytes: ' + bufferSize);
     }
     blocks['size'] = bufferSize;
-    let bytesRead = await readFile(0);
+    let bytesRead = await readMore(0);
     if (!bytesRead || bytesRead < 8) {
         throw new Error('Too few bytes loaded: ' + bytesRead);
     }
@@ -54,17 +55,32 @@ async function loadBlocksFromFile (fd, buffer) {
             throw new Error("Not a valid marker at offset " + offset + ", found: " + buffer[offset]);
         }
 
-        let blockMarker = buffer[++offset];
+        const blockStart = offset;
+        const blockMarker = buffer[++offset];
          // Start of image scan, end the loop
         if (blockMarker === 0xD9 /* EOI */ || blockMarker === 0xDA /* SOS */) {
-            if(DEBUG) console.log('Start of image', fileOffset + offset);
+            if(DEBUG) console.log('Start of image', fullOffset + offset);
             break;
         }
         let name = blockMarker;
         // Read block size and load into memory
         let size = buffer.readUInt16BE(++offset);
         let metaBuffer = Buffer.alloc(size + 2);
-        await read(fd, metaBuffer, 0, metaBuffer.length, fileOffset + offset - 2);
+        // Do we have the data in the buffer or do we need to read from file
+        if (buffer.length > metaBuffer.length + blockStart) {
+            buffer.copy(metaBuffer, 0, blockStart, metaBuffer.length + blockStart);
+        } else {
+            let bytesToCopy = metaBuffer.length;
+            let bytesAvaliable = buffer.length - blockStart;
+            let copyStart = blockStart;
+            while (offset < bytesRead && bytesToCopy > 0) {
+                buffer.copy(metaBuffer, metaBuffer.length - bytesToCopy, copyStart, copyStart + bytesAvaliable);
+                bytesToCopy -= bytesAvaliable;
+                bytesRead = await readMore(offset);
+                copyStart = 0;
+                bytesAvaliable = Math.min(buffer.length, bytesToCopy)
+            }
+        }
         
         // Load the block name if it has one
         if(blockMarker >= 0xE0 && blockMarker <= 0xE9) {
@@ -75,24 +91,42 @@ async function loadBlocksFromFile (fd, buffer) {
         // Prepare next iteration
         offset += size;
         if(offset >= bytesRead - 4) {
-            bytesRead = await readFile(offset);
+            bytesRead = await readMore(offset);
         }
     }
     return blocks;
 }
 
-module.exports = async function(filePath) {
-    let fd;
+/**
+ * pathOrBuffer - required parameter with a buffer or file path as a string
+ * readMoreFunc - method to read more information into the buffer
+ */
+module.exports = async function(pathOrBuffer, readMoreFunc) {
 	try {
-		fd = await open(filePath, 'r');
-		const buffer = Buffer.alloc(BUFFER_SIZE);
-		return await loadBlocksFromFile(fd, buffer);
+        if (Buffer.isBuffer(pathOrBuffer)) {
+            readMoreFunc = readMoreFunc || function() { return pathOrBuffer.length };
+            return loadBlocks(pathOrBuffer, pathOrBuffer.length, readMoreFunc)
+        } else if (isString(pathOrBuffer)) {
+            const fd = await open(pathOrBuffer, 'r');
+            const buffer = Buffer.alloc(BUFFER_SIZE);
+            let fileOffset = 0;
+            readMoreFunc = async function readFile(stepForward) {
+                fileOffset += stepForward;
+                if (DEBUG) console.log('reading file', fileOffset);
+                // Read the file, callback methods has been promisified with util and returns both the buffer and the bytes read
+                return (await read(fd, buffer, 0, buffer.length, fileOffset)).bytesRead;
+            }
+		    return loadBlocks(buffer, await readFileSize(fd), readMoreFunc).then((result) => {
+                if(fd) {
+                    close(fd);
+                }
+                return result;
+            });
+        } else {
+            throw new Error('Unknown argument type. Expected string or buffer but was: ' + typeof pathOrBuffer);
+        }
 	} catch (ex) {
         if(DEBUG) console.error(ex);
         throw ex;
-	} finally {
-		if(fd) {
-			close(fd);
-		}
 	}
 }
