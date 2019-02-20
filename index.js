@@ -22,25 +22,29 @@ function isString (value) {
     return typeof value === 'string' || value instanceof String;
 }
 
-async function readFileSize(fd) {
+async function readSize(fd) {
     let fst = await fstat(fd);
     return fst.size;
-}
+} 
 
-async function loadBlocks (buffer, bufferSize, readMoreFunc) {
-    var offset = 0,
-    fullOffset = 0,
+async function loadBlocksFromFile (fd) {
+    var offset = 0, 
+    fileOffset = 0,
     blocks = {};
-    async function readMore(stepForward) {
-        fullOffset += offset;
+    const buffer = Buffer.alloc(BUFFER_SIZE);
+    async function readFile(stepForward) {
+        fileOffset += stepForward;
         offset = 0;
-        return readMoreFunc(stepForward);
+        if (DEBUG) console.log('reading file', fileOffset);
+        // Read the file, callback methods has been promisified with util and returns both the buffer and the bytes read
+        return (await read(fd, buffer, 0, buffer.length, fileOffset)).bytesRead;
     }
+    let bufferSize = await readSize(fd);
     if (!bufferSize || bufferSize < 8) {
         throw new Error('Too few bytes: ' + bufferSize);
     }
     blocks['size'] = bufferSize;
-    let bytesRead = await readMore(0);
+    let bytesRead = await readFile(0);
     if (!bytesRead || bytesRead < 8) {
         throw new Error('Too few bytes loaded: ' + bytesRead);
     }
@@ -59,7 +63,7 @@ async function loadBlocks (buffer, bufferSize, readMoreFunc) {
         const blockMarker = buffer[++offset];
          // Start of image scan, end the loop
         if (blockMarker === 0xD9 /* EOI */ || blockMarker === 0xDA /* SOS */) {
-            if(DEBUG) console.log('Start of image', fullOffset + offset);
+            if(DEBUG) console.log('Start of image', fileOffset + offset);
             break;
         }
         let name = blockMarker;
@@ -70,16 +74,7 @@ async function loadBlocks (buffer, bufferSize, readMoreFunc) {
         if (buffer.length > metaBuffer.length + blockStart) {
             buffer.copy(metaBuffer, 0, blockStart, metaBuffer.length + blockStart);
         } else {
-            let bytesToCopy = metaBuffer.length;
-            let bytesAvaliable = buffer.length - blockStart;
-            let copyStart = blockStart;
-            while (offset < bytesRead && bytesToCopy > 0) {
-                buffer.copy(metaBuffer, metaBuffer.length - bytesToCopy, copyStart, copyStart + bytesAvaliable);
-                bytesToCopy -= bytesAvaliable;
-                bytesRead = await readMore(offset);
-                copyStart = 0;
-                bytesAvaliable = Math.min(buffer.length, bytesToCopy)
-            }
+            await read(fd, metaBuffer, 0, metaBuffer.length, fileOffset + offset - 2);
         }
         
         // Load the block name if it has one
@@ -91,8 +86,52 @@ async function loadBlocks (buffer, bufferSize, readMoreFunc) {
         // Prepare next iteration
         offset += size;
         if(offset >= bytesRead - 4) {
-            bytesRead = await readMore(offset);
+            bytesRead = await readFile(offset);
         }
+    }
+    return blocks;
+}
+
+async function loadBlocksFromBuffer(buffer) {
+    var offset = 0, 
+    blocks = {};
+    let bufferSize = buffer.length;
+    if (!bufferSize || bufferSize < 8) {
+        throw new Error('Too few bytes: ' + bufferSize);
+    }
+    blocks['size'] = bufferSize;
+
+    // check for jpeg magic bytes header
+    if (buffer[offset++] != 0xFF || buffer[offset++] != 0xD8) {
+        throw new Error("Buffer is not a valid JPEG");
+    }
+    
+    // Loop through the file looking for the header bytes
+    while (offset < bufferSize) {
+        if (buffer[offset] != 0xFF) {
+            throw new Error("Not a valid marker at offset " + offset + ", found: " + buffer[offset]);
+        }
+        const blockStart = offset;
+        const blockMarker = buffer[++offset];
+         // Start of image scan, end the loop
+        if (blockMarker === 0xD9 /* EOI */ || blockMarker === 0xDA /* SOS */) {
+            if(DEBUG) console.log('Start of image', offset);
+            break;
+        }
+        let name = blockMarker;
+        // Read block size and load into memory
+        let size = buffer.readUInt16BE(++offset);
+        let metaBuffer = Buffer.alloc(size + 2);
+        buffer.copy(metaBuffer, 0, blockStart, metaBuffer.length + blockStart);
+        
+        // Load the block name if it has one
+        if(blockMarker >= 0xE0 && blockMarker <= 0xE9) {
+            name = getBufferName(metaBuffer);
+        }
+        blocks[name] = metaBuffer;
+
+        // Prepare next iteration
+        offset += size;
     }
     return blocks;
 }
@@ -104,19 +143,10 @@ async function loadBlocks (buffer, bufferSize, readMoreFunc) {
 module.exports = async function(pathOrBuffer, readMoreFunc) {
 	try {
         if (Buffer.isBuffer(pathOrBuffer)) {
-            readMoreFunc = readMoreFunc || function() { return pathOrBuffer.length };
-            return loadBlocks(pathOrBuffer, pathOrBuffer.length, readMoreFunc)
+            return loadBlocksFromBuffer(pathOrBuffer)
         } else if (isString(pathOrBuffer)) {
             const fd = await open(pathOrBuffer, 'r');
-            const buffer = Buffer.alloc(BUFFER_SIZE);
-            let fileOffset = 0;
-            readMoreFunc = async function readFile(stepForward) {
-                fileOffset += stepForward;
-                if (DEBUG) console.log('reading file', fileOffset);
-                // Read the file, callback methods has been promisified with util and returns both the buffer and the bytes read
-                return (await read(fd, buffer, 0, buffer.length, fileOffset)).bytesRead;
-            }
-		    return loadBlocks(buffer, await readFileSize(fd), readMoreFunc).then((result) => {
+		    return loadBlocksFromFile(fd).then((result) => {
                 if(fd) {
                     close(fd);
                 }
