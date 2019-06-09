@@ -21,7 +21,7 @@
   "author": "Andreas Sehr",
   "license": "MIT",
   "devDependencies": {
-    "mocha": "^5.2.0"
+    "mocha": "5.2.0"
   },
   "browser": {
     "./index.js": "./browser.js"
